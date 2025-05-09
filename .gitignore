@@ -1,0 +1,16 @@
+# File Patterns that Git should not track
+# RStudio
+.Rproj.user/
+.Rhistory
+.RData
+
+# renv
+renv/library/
+renv/python/
+
+# Quarto cache
+_cache/
+_site/
+
+# OS files
+.DS_Store
