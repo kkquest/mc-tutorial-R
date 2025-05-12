@@ -1,0 +1,553 @@
+---
+title: "Noise-Busters: How to Sharpen Your Monte Carlo"
+format: html
+execute:
+  echo: true
+  warning: false
+  error: false
+---
+
+```{r setup, echo=FALSE}
+#This project uses renv to manage package versions (see renv.lock) 
+#To restore, run renv::restore().
+
+# Load required libraries
+library(ggplot2)
+library(withr)
+library(knitr)
+
+
+# — Project structure
+#   R/
+#   ├─ simulations.R                # rare_event_standard(), sim_antithetic(), sim_y_cv(), sim_x_cv()
+#   ├─ true_value.R                 # true_estimate
+#   ├─ variance_reduction_methods.R # antithetic_mc(), control_variate_mc(), importance_mc()
+#   ├─ confidence_intervals.R       # ci_df()
+#   └─ plotting.R                   # plot_estimates()
+
+source("../R/simulations.R") 
+source("../R/true_value.R") 
+source("../R/variance_reduction_methods.R") 
+source("../R/confidence_intervals.R") # ci_df()
+source("../R/plotting.R") # plot_estimates()
+
+# Define sample size vector
+sample_sizes <- c(1e3, 1e4, 5e4, 1e5, 5e5, 1e6)
+```
+
+### 1 Do You Know Your Monte Carlo?
+
+  Remember when we first met in **Tutorial #1: Estimating $\pi$ with Monte Carlo** — where we used a humble sampler to toss random darts, watched our estimate inch toward 3.14, and felt like statistical wizards? If you need a refresher, dust off that guide [here](https://www.youtube.com/watch?v=p4Jj9QZFJvw) — it’s still our go‑to warm‑up.
+
+  But hold on to your hats, because not every problem plays nicely with our random‑point strategy. 
+  
+  *In real‑world applications, naïve Monte Carlo can quickly morph into Monte Chaos — slow convergence, ballooning variance, and estimates that jiggle all over the place*. 
+  
+  In this chapter, we’ll pinpoint exactly where — and why — standard Monte Carlo hits its limits, setting the stage for our arsenal of variance‑reduction techniques.
+
+### 2.1 When Standard Monte Carlo Falters
+  
+  Monte Carlo is our trusty statistical workhorse — great for approximating expectations and probabilities — but every steed has its weak spots. In practice, naïve Monte Carlo can grind to a halt in two notorious scenarios:
+
+1. **Rare‑Event Estimation**. Imagine estimating:
+$$
+p = P(Z_1 + Z_2 > 4),\quad Z_i \sim N(0,1),
+$$
+which only happens about 0.2% of the time. Standard Monte Carlo becomes the tortoise in a race against time: you need astronomically many samples before you accumulate enough “hits” to stop your estimate from bouncing around like a pinball. After all, the variance of the sample proportion $Var(p^)=p(1−p)n$ stays stubbornly large unless n is on the order of millions — if not billions.
+
+2. **Intractable Integrals**.Now let's think about integrals without closed‑form solutions, for example:
+$$
+I=∫f(x) dP(x),
+$$
+showing up in high‑dimensional Bayesian posteriors, exotic payoff functions, or particle‑physics models. If $f(x)$ is “spiky” or the distribution $P$ wiggles in complicated ways, our random samples need to explore vast, convoluted spaces — and variance explodes.
+
+In both of these villains’ origin stories, naïve Monte Carlo demands so many samples that — even with parallel clusters and job schedulers — your pipeline chokes. We need both statistical **and** software-engineering tricks: variance-reduction and clean, reproducible code.
+
+### 2.2 Why so many samples?
+
+Because standard Monte Carlo converges at only $O(1/\sqrt{n})$. In human terms, that means **halving** your error demands **quadrupling** the number of simulations! When your target — be it a rare‑event indicator or a jagged payoff function — carries high variance those extra samples still leave your estimates jittery for far longer than you’d like.  
+
+### 2.3 Monte Carlo Chaos: Simple Example
+
+To see this in action, consider estimating
+$$
+p \;=\; P\bigl(Z_1 + Z_2 > 4\bigr), \quad Z_i \sim N(0,1).
+$$
+Because $Z_1 + Z_2 \sim N(0,2)$, the **true** probability is
+$$
+p \;=\; 1 - \Phi\!\Bigl(\frac{4}{\sqrt{2}}\Bigr)
+\;\approx\; 0.00235.
+$$
+
+For this example, let's independently run Standard MC 3 times with 100,000 sims each. We get:
+```{r monte_chaos, cache=TRUE, echo=FALSE}
+withr::local_seed(123)
+runs <- replicate(3, mean(rare_event_standard(1e5, threshold = 4)))
+data.frame(run = 1:3, estimate = runs)
+
+# Note: it is recommended to compute intensive chunks with cache=TRUE
+#to avoid rerunning hundreds of thousands of samples on every rebuild.
+```
+Nice — all three runs hit the neighborhood of $0.00235$. But don't break out the champagne just yet. Even with $\hat p = 0.0024$ and $n = 10^5$, the standard error is
+
+$$
+\mathrm{SE}(\hat p)
+= \sqrt{\frac{\hat p\,(1 - \hat p)}{n}}
+\approx 0.0001548.
+$$
+
+gives a 95 % confidence interval of
+
+$$
+\hat p \pm 1.96\,\mathrm{SE}(\hat p)
+\approx 0.0024 \pm 0.0003034,
+$$
+
+or about $\pm12.7\%$ relative uncertainty.
+
+> Ouch. A dozen‑percent wiggle room might sound harmless in theory, but in risk management, engineering, or physics, that’s a one‑way ticket to “unacceptable.” Decision‑makers often demand even as low as 1% before pulling the trigger. 
+
+**Can I decrease my confidence interval with Monte Carlo?** Yes — but prepare to pay!
+
+(a) *The Four‑Times Rule*
+  Standard Monte Carlo is stubbornly $O(1/\sqrt{n})$. Recall: halving your confidence‑interval width (e.g. from 15% to ≈7.5%) requires **quadrupling** your sample size — from 100,000 to 400,000 runs — every single time you need more precision.
+
+(b) *Practical Cost*
+  Even if each trial takes only 0.001s, 100,000 simulations require about 100s of compute. Four times that is nearly **7 minutes** — and that’s just for one estimate. Multiply across multiple parameters or repeated runs, and your compute budget (and patience) will quickly evaporate.
+
+Since our toy problem is cheap to compute, we can crank up the sample size and watch both the bias and variance collapse toward the true value. 
+
+```{r plot_monte_chaos, echo=FALSE, cache=FALSE}
+# Set the seed
+withr::local_seed(42)
+
+# Compute ci per sample size 
+df_std <- ci_df(
+  vec = rare_event_standard(max(sample_sizes), threshold = 4),
+  sample_sizes = sample_sizes,
+  true_p = true_estimate
+)
+
+# Plot the results
+plot_estimates(
+  df = df_std,
+  true_p = true_estimate,
+  title = "Standard MC: Estimates and 95% CIs by Sample Size"
+)
+```
+
+In the plot above (note the dash line is our true $p$), notice:
+
+- At $n = 10^3$, the 95% CI is a $[-0.0005, 0.0065]$ — and the point estimate underestimates the true $p \approx 0.00235$.
+- At $n = 5\times10^4$, things look steadier — still noisy though.
+- Even at $n = 10^6$, the CI continues to shrink, illustrating that each four‑fold increase in $n$ roughly halves the interval width.
+
+This is the $O(1/\sqrt{n})$ grind: more samples yield tighter confidence intervals, but at the cost of exponentially greater computation.  
+
+**Bottom line**:  Standard Monte Carlo will eventually nail down your rare‑event probability — but at the cost of dramatically more samples (and more time). In the next section, we’ll unlock three variance‑reduction power tools that deliver comparable — or even better — precision with far fewer simulations:
+
+1) **Antithetic Sampling**, which pairs each random draw with its “opposite” to cancel noise;
+
+2) **Control Variates**, which uses an auxiliary variable with known expectation as your statistical safety net;
+
+3) **Importance Sampling**, which wraps your sampling distribution to focus on the most “important” regions.
+
+### 3.1 Standard MC as a Baseline 
+Before we unleash our variance‑reduction magic, let’s pin down our **baseline** — the trusty, if somewhat plodding, standard Monte Carlo with a modest $n = 10^3$.
+
+Our go‑to unbiased estimator remains
+$$
+\hat p_{\text{MC}} = \frac1n \sum_{i=1}^n \mathbf{1}\{Z_{1,i} + Z_{2,i} > 4\},
+$$
+
+which carries sampling variance
+$$
+\mathrm{Var}(\hat p_{\text{MC}}) \;=\; \frac{p(1-p)}{n}.
+$$
+
+Calculating these for our previous example, we get:
+```{r baseline, echo=FALSE}
+# Set the seed
+withr::local_seed(42)
+
+# Run standard MV for our simple example at n=10^3
+vec_std <- rare_event_standard(n = 1e3, threshold = 4)
+
+# Compute the estimates
+std_var  <- var(vec_std)
+std_est  <- mean(vec_std)
+
+#Print the results
+cat("Standard MC estimate:", std_est,
+    "\nSampling variance:", std_var, "\n")
+```
+
+> With $n = 10^3$ draws (by bottlenecking $n$ this way, we’ll really get to see how our variance‑reduction techniques calm the storm), our standard Monte Carlo doesn’t just stumble — it wildly overshoots with $\hat p = 0.005$ vs. the true $p\approx0.00235$. It also rages with massive sampling variance ($\mathrm{Var} \approx 0.00498$). It’s like trying to staple jelly to a wall—messy, unpredictable, and almost guaranteed to make a mess.
+
+Time to roll up our sleeves and tackle this jelly mess head‑on!
+
+### 3.2 Antithetic Sampling 
+
+**The way it works** 
+
+Antithetic sampling constructs pairs $(U,1-U)$ to induce negative correlation between paired outcomes, reducing variance. Formally, if $Y = f(U)$ and $Y' = f(1-U)$, then averaging the pair yields:
+$$
+\mathrm{Var}\!\biggl(\frac{Y + Y'}{2}\biggr)
+= \frac{1}{2}\bigl[\mathrm{Var}(Y) + \mathrm{Cov}(Y,Y')\bigr],
+$$ 
+and because $\mathrm{Cov}(Y,Y') < 0$, the variance of $\tfrac{Y+Y'}{2}$ is strictly less than that of a solo $Y$.
+
+Applying Antithetic Sampling to our simple example of estimating rare event with $n = 10^3$, we get the following estimates: 
+
+```{r antithetic, echo=FALSE}
+# Set the seed
+withr::local_seed(42)
+
+# Apply Antithetic sampling to our simple example for n=10^3
+vec_anti <- antithetic_mc(
+  sim_fn = sim_antithetic, 
+  n_sims = 1e3,
+  threshold = 4
+)
+
+# Compute the estimates
+anti_est <- mean(vec_anti)
+anti_var <- var(vec_anti)
+
+# Print the results
+cat("Antithetic estimate:", anti_est,
+    "\nSampling variance:", anti_var, "\n")
+```
+
+> With just $n = 10^3$, Antithetic Sampling nearly halves our estimator’s mood swings — dropping the point estimate from 0.005 down to 0.003 (much closer to the true 0.00235) and the sampling variance plummets from about $0.00498$ to $0.00149$. Congrats, by introducing that negative correlation, we’ve effectively muted half the noise.
+
+Below, we repeat the same sample‑size sweep we did for Standard MC — only now our estimates come in antithetically tuned.
+
+```{r plot_antithetic, echo=FALSE}
+# Set the seed
+withr::local_seed(42)
+
+# Compute the CI for different sample sizes
+df_anti <- ci_df(
+  vec = antithetic_mc(
+    sim_fn = sim_antithetic,
+    n_sims = max(sample_sizes),
+    threshold = 4
+    ),
+  sample_sizes = sample_sizes,
+  true_p = true_estimate
+)
+
+# Plot the results
+plot_estimates(
+  df = df_anti,
+  true_p = true_estimate,
+  title = "Antithetic Sampling: Estimates and 95% CIs by Sample Size"
+)
+```
+
+Comparing this Antithetic Sampling plot to our earlier Standard MC results, we immediately see two key improvements:
+
+1. *Tighter CIs at Low $n$*: At $n=10^3$, Antithetic’s 95% CI spans roughly $[0.001, 0.007]$, whereas Standard MC’s CI was $[-0.0005, 0.0065]$. Even with the same sample budget, negative correlation cuts the interval width by about 14%.
+
+2. *Consistent Centering Around True $p$*: Across all $n$, Antithetic estimates hug the true‑$p$ line more faithfully. Standard MC was liable to wander at low $n$, but Antithetic keeps your estimate honest from the start.
+
+> **Bottom line**: Antithetic Sampling delivers **narrower** confidence intervals at low $n$ and gives you reliable estimates with far fewer simulations — in other words, stronger precision without extra compute. Yet, it is not a silver bullet — so let's keep exploring.
+
+
+### 3.3 Control Variates
+
+**The way it works:**
+
+Control Variates rely on an **auxiliary random variable** $X$ whose expectation $\mu_X = E[X]$ is known. You simulate your target $Y$ (say, the indicator $\mathbf{1}\{Z_1+Z_2>4\}$) in tandem with $X$, then form:
+
+$$
+\hat Y_{\mathrm{CV}}
+= \bar Y \;-\; \beta\,(\bar X - \mu_X),
+\beta \;=\; \frac{\mathrm{Cov}(Y,\,X)}{\mathrm{Var}(X)}
+$$
+By choosing $\beta$ this way, you **minimise** the variance of $\hat Y_{\mathrm{CV}}$. In fact,
+$$
+\mathrm{Var}(\hat Y_{\mathrm{CV}})
+= \mathrm{Var}(\bar Y) \;\bigl(1 - \rho_{Y,X}^2\bigr),
+$$
+where $\rho_{Y,X}$ is the correlation between $Y$ and $X$. And hence, the closer $\rho_{Y,X}$ is to $\pm1$, the greater the variance reduction.  
+
+> 💡 By “borrowing” the known mean of $X$ to correct $\bar Y$, we project out the component of randomness in $Y$ that $X$ explains — just like using a GPS to recalibrate your wandering path.
+
+Applying Control Variates to our simple example of estimating rare event with $n = 10^3$, we get the following estimates: 
+
+```{r control_variates, echo=FALSE}
+# Draw the samples
+withr::local_seed(42)
+
+# Apply Control Variates to our simple example for n=10^3
+vec_cv <- control_variate_mc(
+  sim_fn = sim_y_cv,
+  cv_fn = sim_x_cv,
+  cv_known = 0,
+  n_sims = 1e3,
+  threshold= 4 
+)
+
+# Calculate estimates
+cv_est <- mean(vec_cv)
+cv_var <- var(vec_cv)
+
+# Print the results
+cat("Control Variate estimate:", cv_est,
+    "\nSampling variance:", cv_var, "\n")
+```
+
+> With just $n = 10^3$, Control Variates tames our wild baseline: the estimate shrinks from 0.005 to about 0.0032 (closer to the true 0.00235), and variance plunges from ≈0.00498 to ≈0.00291 — a roughly 40% variance cut without begging for more samples. Who knew a sidekick variable could pack such a punch? 
+
+Below, we repeat our sample‑size sweep with control variates in play.
+
+```{r plot_control, echo=FALSE, cache=FALSE}
+# Estimate CI for Control Variates
+df_cv <- ci_df(
+  vec = control_variate_mc(
+    sim_fn = sim_y_cv,
+    cv_fn = sim_x_cv,
+    cv_known = true_estimate,
+    n_sims = max(sample_sizes),
+    threshold = 4
+    ),
+  sample_sizes = sample_sizes,
+  true_p = true_estimate
+)
+
+plot_estimates(
+  df = df_cv,
+  true_p = true_estimate, 
+  title = "Control Variates: Estimates and 95% CIs by Sample Size"
+)
+```
+
+What we observe?
+
+1. *Noticeable CI tightening at small $n$*: Control Variates provide a meaningful improvement of the confidence interval starting from $n = 10^3$. However, the band is still too wide, considering that we trying to estimate as low probability as 0.0002.
+2. *Diminishing returns at high $n$*: As $n$ grows to $5 × 10^5$ and beyond, the estimates converge toward the true value and their CIs overlap so closely that the practical difference becomes marginal. The real benefit of Control Variates (as it is for Auxiliary Variables as well) is most apparent in low- to moderate‑$n$ regimes.
+
+> **Bottom Line**: Control Variates give you a reliable, consistent edge — especially when you can’t afford enormous sample sizes. They shave off a chunk of variance and reduce bias, yet still leave you wrestling with wide intervals until $n$ gets large.
+
+### 3.4 Importance Sampling 
+
+Finally let's talk about my personal favourite - Importance Sampling!
+
+**How it works:**  
+
+When the event you care about is rare under your original distribution $p$, you end up squandering samples on “unimportant” regions.
+
+Importance Sampling fixes this by **sampling from a different distribution** $q(x)$ that **over‑samples** the critical region (e.g. the tail), and then **reweights** those draws to keep the estimator unbiased.
+
+Concretely, to estimate
+$$
+p \;=\; \mathbb{E}_p\bigl[\mathbf{1}\{Z > 4\}\bigr]
+= \int \mathbf{1}\{z > 4\}\,p(z)\,dz,
+$$
+we instead draw $Z_i \sim q(z)$ (for example, $q$ could be a normal shifted to mean 2 so that more draws exceed 4) and compute the weighted estimator as
+
+$$
+\hat p_{\mathrm{IS}}
+= \frac{1}{n} \sum_{i=1}^n \mathbf{1}\{Z_i > 4\}\,\frac{p(Z_i)}{q(Z_i)}.
+$$
+
+Here:
+
+* $\mathbf{1}\{Z_i > 4\}$ flags whether the sample falls in the rare tail.
+* the **importance weight** $w_i = \frac{p(Z_i)}{q(Z_i)}$ then corrects for the fact that we over‑sampled from $q$ instead of $p$.
+
+Because we draw many more $Z_i$ in the region where $\mathbf{1}\{Z_i>4\}=1$, our variance $\mathrm{Var}(\hat p_{\mathrm{IS}}) = \frac{1}{n} \,\mathrm{Var}_q\Bigl[\mathbf{1}\{Z>4\}\,\tfrac{p(Z)}{q(Z)}\Bigr]$
+can be dramatically lower than $\mathrm{Var}(\hat p_{\mathrm{MC}})$, especially if $q$ is chosen to closely match the shape of the integrand.
+
+Since our rare event depends on  $S = Z_1 + Z_2 \sim N(0,2),$ 
+we choose an importance proposal
+$q(s) = \mathcal{N}\bigl(\mu_{\rm shift},\,2\bigr)$ 
+
+This shifts more samples into the tail $s>4$, and we correct for the change of measure by weighting each draw. Thus, we get the following estimates:
+
+```{r importance_sampling, echo=FALSE}
+# Set the seed
+withr::local_seed(42)
+
+# Apply Importance Sampling to our example at n=10^3
+vec_is <- importance_mc(
+  n_sims = 1e3,
+  mu_shift = 2,
+  threshold = 4,
+  seed = 123)
+
+# Calculate the estimates
+is_var <- var(vec_is)
+is_est <- mean(vec_is)
+
+# Print the results
+cat("Importance Sampling estimate:", is_est,
+    "\nSampling variance:", is_var, "\n")
+```
+
+> With $n = 10^3$, Importance Sampling delivers an estimate $\hat p_{\rm IS} = 0.0023$, and slashes the sampling variance to $7.14\times10^{-5}$. That’s more than a **100×** reduction in variance compared to standard Monte Carlo at the same sample size $n$ — proof that smart sampling trumps brute force. 
+
+Let’s sweep through sample sizes again and watch how quickly Importance Sampling homes in on $p$.
+
+```{r plot_importance, echo=FALSE}
+# Compute Importance Sampling CI for different sample sizes
+df_is <- ci_df(
+  vec = importance_mc(
+    n_sims = max(sample_sizes),
+    mu_shift = 2,
+    threshold = 4
+    ),
+  sample_sizes = sample_sizes,
+  true_p = true_estimate
+)
+
+# Plot estimates and CIs
+plot_estimates(
+  df = df_is,
+  true_p = true_estimate,
+  title = "Importance Sampling: Estimates and 95% CIs by Sample Size"
+)
+```
+
+From the Importance Sampling plot we observe:
+
+1. *Pinpoint CIs at low $n$*: at $n=10^3$, the 95% interval is roughly %[0.0015,0.0025] — essentially a hair’s breadth around 0.00235. 
+2. *Rapid stabilisation*: by $n=5\times10^4$, the error bars have all but vanished.
+3. *Consistent unbiasedness*: all point estimates cluster tightly on the dashed “True p” line, confirming minimal bias.
+4. *Massive efficiency gains*: for the same level of precision, Importance Sampling needs about **100× fewer samples** than standard Monte Carlo — translating directly into massive savings in CPU time and cost.
+
+> **Bottom Line**: Importance Sampling is the heavyweight champion of variance reduction. By zeroing in on the “important” parts of the distribution, it achieves razor‑sharp precision with a fraction of the simulations required by any other method.
+
+### 4.1 Final Side‑by‑Side Comparison 🥊
+
+Let’s line up our three champions against the baseline, now including approximate compute times for $n = 10^3$ simulations:
+
+```{r comparison, echo=FALSE, cache=TRUE}
+# Since even with a fixed seed, system.time() reports different elapsed times
+# depending on CPU load, background processes, and others minor things,
+# We hard-code them into our final tutorial text
+
+# Define the number of sims
+n <- 1000
+
+# Calculate the approximate compute time for Standard MC
+t_std <- system.time({vec_std})["elapsed"]
+# 0.000
+
+# Calculate the approximate compute time for Antithetic Sampling
+t_anti <- system.time({vec_anti})["elapsed"]
+#0.002
+
+# Calculate the approximate compute time for Control Variates
+t_cv <- system.time({vec_cv})["elapsed"]
+#0.003
+
+# Calculate the approximate compute time for Importance Sampling
+t_is <- system.time({vec_is})["elapsed"]
+#0.000
+
+# Create a data frame
+df_times <- data.frame(
+  Method    = c("Standard MC", "Antithetic Sampling", "Control Variates", "Importance Sampling"),
+  Variance  = c(std_var, anti_var, cv_var, is_var),
+  Time_s    = c(0.000, 0.002, 0.003, 0.000)
+)
+
+# Save and print the results
+readr::write_csv(df_times, "../outputs/tables/vr_timings.csv")
+knitr::kable(df_times, digits = c(NA, 8, 4),
+             caption = "Sampling Variances and Approximate Compute Times")
+```
+
+
+> **Notes on the approximate compute time**
+
+> * **Standard MC** zips through 1 000 draws in the blink of an eye—our “zero-cost” baseline.
+> * **Antithetic Sampling** tacks on a trivial pairing step (just a couple more milliseconds) yet shaves off \~50 % of your variance—like getting a free precision upgrade.
+> * **Control Variates** spends slightly more time as Antithetic and provides almost the same variance.
+> * **Importance Sampling**, our heavyweight variance-slayer, finishes just as fast as Standard MC here — because calculating and applying importance weights is almost as cheap as drawing a random number.
+
+In other words, each of our variance-reduction champions brings serious precision improvements. So you are free to pick your tool based on your problem’s needs!
+
+### 4.2 Final Takeaways
+
+Not to be annoying, but let's recap what we have learnt today. 
+
+Below is a quick reference for each technique—what it does best, its cost, and when you should reach for it in your own MCMC workflows.
+
+```{r final_table, echo=FALSE}
+# Define the summary table for variance-reduction techniques
+techniques <- c(
+  "Standard MC",
+  "Antithetic Sampling",
+  "Control Variates",
+  "Importance Sampling"
+)
+
+key_idea <- c(
+  "Pure random sampling",
+  "Pair samples with their “mirror” ($U$ vs. $(1−U)$)",
+  "Regress out a known-mean auxiliary $X$",
+  "Over-sample important regions and reweight"
+)
+
+variance_reduction <- c(
+  "Baseline ($O(1/√n)$)",
+  "**more then 50%** reduction",
+  "**more then 50** reduction",
+  "**> 100×** reduction"
+)
+
+compute_cost <- c(
+  "Lowest",
+  "+20%",
+  "+30%",
+  "Lowest"
+)
+
+when_to_use <- c(
+  "Any problem as a sanity check or when variance is low and analytic tricks aren’t available.",
+  "When your simulator is cheap and you can naturally generate opposites ($U$ vs.$(1−U)$).",
+  "When you have a strongly correlated control whose expectation you can compute.",
+  "When targeting very rare events or tail regions and you **can design a good proposal $q$**."
+)
+
+df_summary <- data.frame(
+  Technique = techniques,
+  `Key Idea` = key_idea,
+  `Variance Reduction` = variance_reduction,
+  `Compute Cost` = compute_cost,
+  `When to Use` = when_to_use,
+  check.names = FALSE,
+  stringsAsFactors = FALSE
+)
+
+# Save it 
+qs::qsave(df_summary, "../outputs/tables/vr_summary.qs")
+
+# Print the results
+kable(df_summary,  booktabs = TRUE, caption = "Quick Reference: Variance-Reduction Techniques for MCMC")
+```
+
+Armed with these techniques, you’ll turn Monte Chaos into Monte Calm—delivering high-precision estimates with far fewer simulations.
+
+### 5. Wrapping up 
+
+If you’ve made it this far, give this tutorial a 👍 and let me know where to point our variance-reduction superpowers next. Here are a few real-world arenas begging for Monte Calm:
+
+> **Bootstrapped Value‑at‑Risk**: Tame financial tail-risks on historical returns using antithetic pairs, control variates, and importance sampling—because nothing says “fun Friday night” like plotting confidence bands for losses!
+
+or 
+
+> **Big‑Data Approximate Queries**: On a platform like Spotify, estimate the “skip rate” within the first 30 seconds across **hundreds of millions** of streams **by stratified subsampling** — grouping by user region and track popularity tiers — so you can produce tight confidence intervals on your skip metrics without processing every single play log.
+
+or 
+
+> suggest your own wild application in our Slack channel!
+
+Drop a comment to vote for your favourite next topic, and we’ll crank up the randomness (in a good way) on a real-world problem of your choice!  
+
+*Note aside: if you’re curious about the back-end code and the functions powering these variance-reduction techniques, check out the full project on GitHub*:
+()

@@ -1,0 +1,5 @@
+Method,Variance,Time_s
+Standard MC,0.004979979979979951,0
+Antithetic Sampling,0.001492492492492486,0.002
+Control Variates,0.0029123134184368023,0.003
+Importance Sampling,7.144980458447245e-5,0

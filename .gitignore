@@ -1,16 +1,21 @@
-# File Patterns that Git should not track
+## File Patterns that Git should not track
+
 # RStudio
 .Rproj.user/
 .Rhistory
 .RData
+.Ruserdata
 
 # renv
 renv/library/
 renv/python/
 
-# Quarto cache
+# Quarto cache/RMarkdown outputs
 _cache/
 _site/
+notebooks/_site/
+notebooks/*_cache/
+notebooks/*_files/
 
 # OS files
 .DS_Store
