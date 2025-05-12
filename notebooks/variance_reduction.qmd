@@ -549,5 +549,4 @@ or
 
 Drop a comment to vote for your favourite next topic, and we’ll crank up the randomness (in a good way) on a real-world problem of your choice!  
 
-*Note aside: if you’re curious about the back-end code and the functions powering these variance-reduction techniques, check out the full project on GitHub*:
-()
+*If you’re curious about the back-end code and the functions powering these variance-reduction techniques, check out the full project repository on [GitHub](https://github.com/kkquest/mc-tutorial-R)

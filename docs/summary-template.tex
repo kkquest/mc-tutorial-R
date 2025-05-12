@@ -21,8 +21,8 @@
 \usepackage[colorlinks]{hyperref}
 
 % Author details
-\title{YOUR PROJECT TITLE}
-\author{YOURCID}
+\title{Noise-Busters: How to Sharpen Your Monte Carlo}
+\author{06009246}
 \date{Compiled: \today}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -30,16 +30,40 @@
 
 \maketitle
 
-\textbf{Github Repo:} \href{https://github.com/zakvarty/eds-notes-quarto/releases/tag/v1.2.0-alpha}{\color{blue}{REPLACE-WITH-LINK-TO-YOUR-TAGGED-RELEASE}}
+\textbf{Github Repo:} \href{https://github.com/kkquest/mc-tutorial-R}{\color{blue}{LINK-TO-THE-TAGGED-RELEASE}}
 
-\section{Project Description (approx. 250 words)}
+\section{Project Description}
 
+This project, \textbf{Noise-Busters: How to Sharpen Your Monte Carlo}, 
+offers a hands-on tutorial in R that unpacks three fundamental variance-reduction 
+strategies — antithetic sampling, control variates and importance sampling — 
+using the estimation of the rare-event probability \(P\bigl(Z_1 + Z_2 > 4\bigr), \quad Z_i \sim \mathcal{N}(0,1)\) as a running example. 
 
-Provide a short project description of 200-300 words here. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Curabitur aliquam turpis tellus, non semper dui tincidunt vel. Nam non mauris nec sem aliquam eleifend ac tincidunt nisl. Sed interdum leo vel mi condimentum, et convallis felis consequat. Fusce commodo erat urna, in imperdiet ante aliquet eu. Maecenas tempus accumsan libero, et consectetur velit varius eu. Vivamus a augue nibh. Maecenas et dignissim erat, quis consectetur est. Ut scelerisque metus ipsum, eu hendrerit purus consequat vel. Praesent sed condimentum ipsum. Fusce non eros at tortor gravida ornare varius vel mauris. In vehicula libero a ligula euismod feugiat.
+The tutorial consists of a suite of standalone, well-organised scripts. 
+In particular:
 
-Donec semper egestas cursus. Morbi a facilisis libero, at lacinia velit. Maecenas mattis tincidunt mauris a venenatis. Vestibulum urna odio, tincidunt quis nibh nec, porttitor porttitor elit. Morbi efficitur ultricies urna, auctor porta dui vehicula et. Pellentesque elementum viverra metus nec efficitur. In dolor magna, auctor nec dapibus quis, tristique ut neque. Integer consectetur vel tortor vel dapibus. Nunc malesuada sem eu accumsan volutpat. Morbi a ullamcorper quam. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae; Aenean a quam ac diam congue rutrum. Integer ultrices congue mauris eget mollis. Nullam vel venenatis massa.
+\begin{enumerate}
+  \item \texttt{simulations.R}: defines the baseline sampler and auxiliary simulators;
+  \item \texttt{variance\_reduction\_methods.R}: implements each reduction algorithm;
+  \item \texttt{confidence\_intervals.R}: constructs data frames of estimates with confidence bounds;
+  \item \texttt{plotting.R}: produces clear, annotated ggplot2 visualisations;
+  \item \texttt{true\_value.R}: supplies the analytical probability for reference.
+\end{enumerate}
 
-Vestibulum dapibus, nulla vel rhoncus iaculis, purus ligula faucibus nibh, at porta felis tellus ac orci. Suspendisse pretium, metus sit amet molestie lobortis, nisi nibh tincidunt magna, quis tempus elit risus at ante. Morbi non ante elit. 
+Each script is modular, immediately executable and fully documented 
+with roxygen2-style comments. The tutorial itself is authored as a Quarto notebook, 
+weaving explanatory text, reproducible code and publication-quality plots 
+to demonstrate the $O(1/\sqrt{n})$ convergence bottleneck of naïve Monte Carlo 
+and to compare how each technique accelerates convergence and curtails sampling variability.
+
+\textbf{A strong emphasis is placed on reproducibility and sound software engineering: 
+simulations are seeded for exact replication, computationally intensive chunks are cached, 
+and the environment is locked down with renv.} Rather than embedding the R functions 
+implementing each variance-reduction technique directly in the narrative, 
+the tutorial focuses on conceptual exposition and visual demonstration; 
+interested readers are most welcome to explore the complete codebase and 
+accompanying materials in the project’s GitHub repository.
+
 
 %=============================================
 \pagebreak
@@ -47,48 +71,55 @@ Vestibulum dapibus, nulla vel rhoncus iaculis, purus ligula faucibus nibh, at po
 
 \section{Assessment Criteria}
 
-\textit{In 2-3 bullet points each and at most 1 page in total, describe how your submission addresses each of the assessment criteria below. You may delete this italicised text when filling in the template.} 
-
-\textbf{Technical Competence:} Proficiency in data collection, processing, analysis, and coding.
-
+\textbf{Technical Competence:}
 \begin{itemize}
-    \item Item 1
-    \item Item 2
+  \item Developed a modular R codebase (in \texttt{R/}) implementing standard Monte Carlo 
+  and three variance‐reduction methods.
+  \item Instrumented convergence diagnostics via \texttt{confidence\_intervals.R} 
+  to compute and tabulate mean ± CI over increasing sample sizes.
 \end{itemize}
 
-\textbf{User Interface:} Design, functionality, and usability of the final data product.
-
+\textbf{User Interface:} 
 \begin{itemize}
-    \item Item 1
-    \item Item 2
+  \item Authored a Quarto notebook with a clear, engaging structure.
+  \item Encouraged curious readers to inspect every standalone R script via the GitHub repository, 
+  fostering hands‐on exploration of the utilised functions.
+  \end{itemize}
+
+\textbf{Analysis and Interpretation:} 
+\begin{itemize}
+  \item Framed each section with precise questions, 
+  contrasted empirical estimates with the closed‐form true value (\texttt{true\_estimate}), 
+  and interpreted CI widths in relative terms.
+  \item Compared bias, variance, and compute time across methods — to
+  highlight not only the varience precision improvement of the discussed methods 
+  but also their computational efficiency.
 \end{itemize}
 
-\textbf{Analysis and Interpretation:} Depth of analysis, appropriate use of statistical methods, and meaningful interpretation.
-
+\textbf{Presentation and Communication:} 
 \begin{itemize}
-    \item Item 1
-    \item Item 2
+  \item Followed a narrative arc (“Hook → Chaos → Methods → Comparison → Takeaways”) with short text blocks, 
+  call-outs, and transition headings to maintain reader engagement.
+  \item Produced simple but informative ggplot2 visualisations in \texttt{plotting.R}, 
+  annotated with true-value lines and concise axis labels, ensuring immediate interpretability.
 \end{itemize}
 
-\textbf{Presentation and Communication:} Clarity, organisation and effectiveness of written and visual communication.
-
+\textbf{Reproducibility and Documentation:} 
 \begin{itemize}
-    \item Item 1
-    \item Item 2
+  \item Managed package versions with \texttt{renv}, 
+  seeded all random draws for exact replication, and cached expensive chunks 
+  to guarantee consistent outputs across renders.
+  \item Documented every function with roxygen2‐style comments (in \texttt{R/*.R}), 
+  and provided a one-click Quickstart in \texttt{README.md} to restore the environment 
+  and render the notebook.
 \end{itemize}
 
-\textbf{Reproducibility and Documentation:} Clarity and completeness of documentation for product use and reproducibility.
-
+\textbf{Project Management:} 
 \begin{itemize}
-    \item Item 1
-    \item Item 2
-\end{itemize}
-
-\textbf{Project Management:} Considered and effective use of project management and version control systems.
-
-\begin{itemize}
-    \item Item 1
-    \item Item 2
+  \item Organised the repository into logical folders; create and followed  
+  a milestone plan with concrete deadlines.
+  \item Captured the finished tutorial in a single comprehensive commit and 
+  marked the submission milestone with a  Git tag: \texttt{v1.0.1}.
 \end{itemize}
 
 %=============================================
@@ -97,35 +128,38 @@ Vestibulum dapibus, nulla vel rhoncus iaculis, purus ligula faucibus nibh, at po
 
 \section{Project Reflection}
 
-\textit{Reflect on the experience of creating your data product. In 6 bullet points and at most 1 page total, summarise the following.} 
-
-\begin{itemize}
-    \item \textit{3 things you have learned as part of this process,}
-    \item \textit{2 aspects of the project that you found challenging or would approach differently with hindsight,} 
-    \item \textit{1 aspect of the project that you would like to learn more about in the future.}
-\end{itemize}
-
-\textit{You may delete this italicised text when filling in the template.} 
-
 \textbf{Learnings:}
 
 \begin{itemize}
-    \item Item 1
-    \item Item 2
-    \item Item 3
+    \item I discovered how orchestrating modular scripts—from samplers to plotting — 
+    creates a flexible framework that can be extended to new Monte Carlo problems with minimal friction.
+    \item Creating convergence diagnostics and CI visualisations reinforced the 
+    practical importance of tracking error bounds as a function of $n$, 
+    rather than relying on point estimates alone.
+    \item Embedding roxygen2 documentation and renv‐driven reproducibility early on 
+    made the codebase feel like a polished software library rather than a one-off analysis notebook.
 \end{itemize}
+
 
 \textbf{Challenges:}
 
 \begin{itemize}
-    \item Item 1
-    \item Item 2
+    \item Initially, I scoped the tutorial as three parts—introducing simple Monte Carlo 
+    via the $\pi$ example, detailing variance-reduction techniques, 
+    and applying them to a real-world problem — but quickly realised this plan was too ambitious 
+    and refocused on the core rare-event narrative for depth over breadth.
+    \item I did not allocate any time to writing \texttt{testthat} tests, 
+    leaving key simulation functions unverified; I now appreciate that formal tests 
+    are crucial for catching regressions and ensuring statistical correctness, 
+    and would include comprehensive test coverage from day one in any future project.
 \end{itemize}
 
 \textbf{Further Development:}
 
 \begin{itemize}
-    \item Item 1
+    \item Going forward, I am keen to explore interactive Shiny or Voila widgets
+    that let users experiment with sample sizes and variance-reduction parameters in real time, 
+    turning static plots into dynamic learning tools.
 \end{itemize}
 
 \end{document}
